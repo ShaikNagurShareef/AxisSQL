@@ -36,9 +36,15 @@ def _eval_ex_after_selection(pred_sql: str, gold_sql: str, db_path: str) -> Opti
     """
     from app.db_utils import execute_sql
 
+    if not gold_sql or not gold_sql.strip():
+        # No gold SQL available (e.g. BIRD hidden test split) — not locally evaluable.
+        # An empty gold_sql still "executes" as an empty result set, which would
+        # otherwise be silently scored as a false 0% match against any prediction.
+        return None
+
     pred_result = execute_sql(db_path, pred_sql)
     gold_result = execute_sql(db_path, gold_sql)
-    
+
     if gold_result.result_rows is None:
         logger.warning(f"Gold SQL execution failed for database: {db_path}")
         return None
