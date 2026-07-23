@@ -1,1 +1,0 @@
-SELECT (COUNT(CASE WHEN `health` = 'Good' THEN 1 END) * 100.0) / COUNT(*) AS percentage FROM `trees` WHERE `boroname` = 'Bronx'

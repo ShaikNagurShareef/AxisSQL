@@ -160,7 +160,6 @@ AxisSQL (built on DeepEye-SQL)
 ├── runner/              # reproducible entry scripts
 ├── results/             # released predictions and few-shot seeds
 ├── script/              # helper shell scripts + scaling_curve.py (AxisSQL evaluation)
-├── paper/               # research paper draft (main.tex, references, style)
 └── workspace/           # generated snapshots and intermediate outputs
 ```
 
@@ -204,15 +203,6 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
-### 3. Optional cloud dependencies
-
-Spider2 cloud evaluation may require valid:
-
-- BigQuery credentials
-- Snowflake credentials
-
-The corresponding paths are configured in [config/config-spider2-example.toml](config/config-spider2-example.toml).
-
 ## Dataset Setup
 
 AxisSQL evaluates on **BIRD mini-dev** (a manageable subset for systematic scaling studies).
@@ -243,8 +233,7 @@ AxisSQL includes model-specific BIRD configurations for four open coder models:
 - [config/config-bird-vllm-qwen2.5coder.toml](config/config-bird-vllm-qwen2.5coder.toml) — Qwen2.5-Coder-32B
 - [config/config-bird-vllm-qwen3coder.toml](config/config-bird-vllm-qwen3coder.toml) — Qwen3-Coder-30B-A3B
 
-Legacy example configs (if running on Spider/Spider2):
-- [config/config-spider-example.toml](config/config-spider-example.toml)
+Legacy example config:
 - [config/config-bird-example.toml](config/config-bird-example.toml)
 
 ### Important config blocks
@@ -447,11 +436,6 @@ This produces `{question_id: "sql_query\t----- bird -----\tdb_id"}`, the exact f
 - **Aggregator**: [app/pipeline/sql_selection/agg_agent.py](app/pipeline/sql_selection/agg_agent.py) — execution-grounded synthesis
 - **Scaling harness**: [script/scaling_curve.py](script/scaling_curve.py) — reproducible experiment orchestration
 - **Model configs**: [config/config-bird-vllm-\*.toml](config/), [config/config-bird-ngrok-gemma4.toml](config/config-bird-ngrok-gemma4.toml) — Gemma3/4 (vLLM and ngrok), Qwen2.5, Qwen3 configurations
-
-### Paper and results
-
-- **Paper draft**: [paper/main.tex](paper/main.tex)
-- **Per-run outputs**: Available in `workspace/` after experiment completion (structured snapshots)
 
 ## FAQ
 

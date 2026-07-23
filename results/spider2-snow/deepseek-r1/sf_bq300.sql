@@ -1,1 +1,0 @@
-SELECT MAX(TRY_TO_NUMBER("answer_count")) AS highest_answer_count FROM "STACKOVERFLOW"."STACKOVERFLOW"."POSTS_QUESTIONS" WHERE "tags" ILIKE '%python-2%' AND "tags" NOT ILIKE '%python-3%'
