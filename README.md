@@ -415,20 +415,29 @@ checkpoints, so there is nothing new to upload:
 
 ### API keys — what's actually needed
 
-- **LLM stage** (`[*.llm]` blocks): none of the vLLM/ngrok-served open models enforce a real key — any placeholder
-  string in `api_key` works, since auth is handled by the tunnel/network layer, not the model server.
+- **LLM stage** (`[*.llm]` blocks): served through the ngrok tunnel at `https://ustllm.ngrok.app/v1`
+  ([config/config-bird-ngrok-gemma4.toml](config/config-bird-ngrok-gemma4.toml)) — this is the required endpoint for
+  submission. It enforces no real key; any placeholder string in `api_key` works, since auth is handled by the
+  tunnel/network layer, not the model server.
 - **Embedding stage** (`[vector_database]`): defaults to `api_type = "openai"` (`text-embedding-3-small`), which
-  **does** require a real `OPENAI_API_KEY`. To avoid handing any external key to BIRD's Eval Team at all, switch to:
+  requires a real API key — **provide your own `OPENAI_API_KEY`** (set via env var or directly in the config's
+  `api_key` field) for this stage. Per BIRD's guideline, hand it to the Eval Team for their run and
+  **reset/rotate it once evaluation completes**.
+- **Gemini as an alternative embedding key**: Gemini's OpenAI-compatibility layer also serves embeddings, so it
+  works through the exact same `api_type = "openai"` code path with no code changes — just point `base_url` at
+  Gemini's compatibility endpoint and use a Gemini API key:
   ```toml
   [vector_database]
-  api_type = "local"
-  embedding_model_name_or_path = "<a local sentence-transformers or Qwen3-Embedding model>"
-  embedding_device = "auto"
+  api_type = "openai"
+  embedding_model_name_or_path = "gemini-embedding-001"
+  base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+  api_key = "your-gemini-api-key-here"
   ```
-  This runs entirely on your own GPU (`app/vector_db/vector_db.py`) — no key required anywhere in the pipeline, and
-  keeps the submission on the simpler GPU-only track instead of the API-key track.
-- If you do keep the OpenAI embedding key: per BIRD's guideline, provide it to the Eval Team for their run and
-  **reset/rotate it once evaluation completes**.
+  (Google's OpenAI-compatibility layer is still in beta as of mid-2026; `gemini-embedding-001` is the text-only
+  model — `gemini-embedding-2-preview` is also available if multimodal embeddings are ever needed.)
+- A fully key-free option also exists if preferred later: `api_type = "local"` runs embeddings on your own GPU via
+  `SentenceTransformerEmbeddingFunction`/`QwenEmbeddingFunction` (`app/vector_db/vector_db.py`), no external key at
+  all — not needed here since you're providing OpenAI/Gemini keys directly.
 
 ### Compliance notes (per BIRD's guideline)
 
