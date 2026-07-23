@@ -57,6 +57,7 @@ def convert_to_json_file(snapshot_path: str, output_path: Optional[str] = None, 
     if output_path is None:
         output_path = _default_json_output_path(snapshot_path)
 
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
 
