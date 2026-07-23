@@ -445,3 +445,92 @@ Based on the question and the two SQL queries, analyze which query answers the q
 
 # Output:
 """
+
+
+AGG_AGENT_SELECTION_PROMPT = """
+# Task:
+You are an aggregator over multiple candidate SQL queries for the same natural-language question.
+Each candidate has been executed against the target SQLite database and its result table is shown.
+A "consistency score" indicates the fraction of independent voters whose query produced the same result table.
+
+Your reasoning MUST proceed in THREE steps, in this exact order:
+1. CRITIQUE each candidate. Identify errors in joins, filters, aggregations, ordering, group-by,
+   or use of the hint. Be skeptical — queries that execute without error often answer the wrong question.
+2. PICK the single best candidate (1-based index).
+3. SYNTHESIZE an improved SQL that fixes the issues you identified. If no candidate's issues need
+   fixing, repeat the chosen candidate's SQL verbatim.
+
+# Rules:
+- The synthesized SQL must be a single, executable SQLite query. No comments. No XML/HTML escaping.
+- Select only the minimum columns the user question asks for. Prefer queries that do not over-select.
+- Higher consistency is weak evidence of correctness; lower consistency does not by itself disqualify.
+- If candidates make complementary mistakes (one has the right JOIN, another the right filter),
+  combine the correct parts into the synthesized SQL.
+
+# Output Format:
+Respond with XML in EXACTLY this order (no extra commentary):
+<critique>
+Brief analysis of each candidate. One short sentence per candidate is enough.
+</critique>
+<best_index>N</best_index>
+<synthesized_sql>
+YOUR_SQL_HERE
+</synthesized_sql>
+
+# Input:
+## Database Schema:
+{DATABASE_SCHEMA}
+
+## Question:
+{QUESTION}
+
+## Hint:
+{HINT}
+
+## Candidates:
+{CANDIDATES_BLOCK}
+
+# Output:
+"""
+
+
+AGG_AGENT_VERIFY_PROMPT = """
+# Task:
+You previously analyzed candidate SQL queries for the question below and proposed a SQL.
+That SQL has been executed; its result table is shown.
+Decide whether the result correctly answers the question.
+
+Be skeptical. Common errors:
+- Extra or missing rows (wrong filter, wrong JOIN type, missing DISTINCT)
+- Wrong aggregation (SUM vs COUNT, missing GROUP BY)
+- Wrong sort order or LIMIT
+- Off-by-one filter values (e.g. > vs >=)
+- Returning the wrong column
+
+If the proposed SQL is correct, return it UNCHANGED. If not, return a CORRECTED SQLite SQL.
+
+# Output Format:
+Respond with XML in EXACTLY this format (no extra commentary):
+<verdict>OK</verdict>   OR   <verdict>REVISED</verdict>
+<final_sql>
+SQL_HERE (identical to PROPOSED_SQL if OK; corrected SQL if REVISED)
+</final_sql>
+
+# Input:
+## Database Schema:
+{DATABASE_SCHEMA}
+
+## Question:
+{QUESTION}
+
+## Hint:
+{HINT}
+
+## Proposed SQL:
+{PROPOSED_SQL}
+
+## Execution Result of Proposed SQL:
+{PROPOSED_RESULT}
+
+# Output:
+"""

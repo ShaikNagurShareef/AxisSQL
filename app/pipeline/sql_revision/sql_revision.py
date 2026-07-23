@@ -127,10 +127,12 @@ class SQLRevisionRunner:
         
         sql_candidates = data_item.sql_candidates
         
-        # If sql_candidates is empty or None, skip revision and set result to None
+        # If sql_candidates is empty or None, SQL generation failed for this item.
+        # Emit an empty list (not None) so validation passes and SQL selection can
+        # gracefully fall back to its "Error" sentinel for this item.
         if not sql_candidates:
-            logger.error(f"sql_candidates is empty or None for item {data_item.question_id}, setting sql_candidates_after_revision to None")
-            data_item.sql_candidates_after_revision = None
+            logger.warning(f"sql_candidates is empty or None for item {data_item.question_id}; emitting empty sql_candidates_after_revision")
+            data_item.sql_candidates_after_revision = []
             data_item.sql_revision_time = time.time() - start_time
             data_item.sql_revision_llm_cost = total_token_usage
             data_item.total_time += data_item.sql_revision_time
@@ -178,18 +180,20 @@ class SQLRevisionRunner:
             total_token_usage["completion_tokens"] += tokens["completion_tokens"]
             total_token_usage["total_tokens"] += tokens["total_tokens"]
         
-        # If any revision failed, set entire result to None
+        # Map results back to the original candidates list (preserving order and duplicates).
+        # If revision failed for a given candidate, fall back to the pre-revision SQL so the
+        # item still has usable candidates downstream rather than collapsing the whole item to None.
+        final_revised_candidates = []
+        for sql in sql_candidates:
+            norm = self._normalize_sql(sql)
+            revised_sql, _ = norm_to_result[norm]
+            final_revised_candidates.append(revised_sql if revised_sql is not None else sql)
+        data_item.sql_candidates_after_revision = final_revised_candidates
         if has_failure:
-            logger.error(f"Some SQL revisions failed for item {data_item.question_id}, setting sql_candidates_after_revision to None")
-            data_item.sql_candidates_after_revision = None
-        else:
-            # Map results back to the original candidates list (preserving order and duplicates)
-            final_revised_candidates = []
-            for sql in sql_candidates:
-                norm = self._normalize_sql(sql)
-                revised_sql, _ = norm_to_result[norm]
-                final_revised_candidates.append(revised_sql)
-            data_item.sql_candidates_after_revision = final_revised_candidates
+            logger.warning(
+                f"Some SQL revisions failed for item {data_item.question_id}; "
+                f"falling back to pre-revision SQL for failed candidates"
+            )
         data_item.sql_revision_time = time.time() - start_time
         data_item.sql_revision_llm_cost = total_token_usage
         data_item.total_time += data_item.sql_revision_time

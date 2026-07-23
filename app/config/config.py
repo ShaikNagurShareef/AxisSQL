@@ -41,6 +41,9 @@ class DatasetConfig(BaseModel):
     save_path: Optional[str] = Field(default=None, description="The save path of the dataset snapshot manifest")
     max_samples: Optional[int] = Field(default=None, description="The maximum number of samples to load")
     max_samples_per_db: Optional[int] = Field(default=None, description="The maximum number of samples to load per database")
+    max_samples_per_difficulty: Optional[int] = Field(default=None, description="Maximum samples per difficulty level (BIRD only; difficulty values: simple/moderate/challenging)")
+    max_samples_per_db_per_difficulty: Optional[int] = Field(default=None, description="Maximum samples per (database, difficulty) pair (BIRD only)")
+    difficulties: Optional[List[str]] = Field(default=None, description="Whitelist of difficulty values to keep (BIRD only). None = all.")
     
     # Spider2 specific configurations
     snowflake_credential_path: Optional[str] = Field(default=None, description="Path to Snowflake credential JSON file")
@@ -137,6 +140,10 @@ class SQLSelectionConfig(BaseModel):
     filter_top_k_sql: int = Field(default=2, description="The number of top k sql to filter")
     evaluator_sampling_budget: int = Field(default=1, description="The sampling budget of the evaluator")
     shortcut_consistency_score_threshold: float = Field(default=0.8, description="The threshold of the consistency score to shortcut")
+    strategy: Literal["pairwise", "agg_agent"] = Field(default="pairwise", description="Selection strategy: 'pairwise' (tournament) or 'agg_agent' (LLM-as-aggregator)")
+    agg_agent_mode: Literal["pick", "synthesize", "both"] = Field(default="both", description="AggAgent mode: 'pick' = choose from candidates only, 'synthesize' = always emit new SQL, 'both' = prefer synthesized if it executes, else fall back to picked")
+    agg_agent_sampling_budget: int = Field(default=3, ge=1, description="Self-consistency samples for AggAgent (majority vote on best_index, most-common-result for synthesized SQL)")
+    agg_agent_verify_loop: bool = Field(default=False, description="If True, run a second LLM call that re-examines the Round-1 SQL together with its execution result and emits a possibly-revised final SQL")
 
 
 class LLMExtractorConfig(BaseModel):
@@ -223,6 +230,9 @@ class Config:
             "save_path": dataset_config.get("save_path"),
             "max_samples": dataset_config.get("max_samples", None),
             "max_samples_per_db": dataset_config.get("max_samples_per_db", None),
+            "max_samples_per_difficulty": dataset_config.get("max_samples_per_difficulty", None),
+            "max_samples_per_db_per_difficulty": dataset_config.get("max_samples_per_db_per_difficulty", None),
+            "difficulties": dataset_config.get("difficulties", None),
             # Spider2 specific configurations
             "snowflake_credential_path": dataset_config.get("snowflake_credential_path", None),
             "bigquery_credential_path": dataset_config.get("bigquery_credential_path", None),
@@ -308,6 +318,10 @@ class Config:
             "filter_top_k_sql": sql_selection_config.get("filter_top_k_sql", 10),
             "evaluator_sampling_budget": sql_selection_config.get("evaluator_sampling_budget", 1),
             "shortcut_consistency_score_threshold": sql_selection_config.get("shortcut_consistency_score_threshold", 0.8),
+            "strategy": sql_selection_config.get("strategy", "pairwise"),
+            "agg_agent_mode": sql_selection_config.get("agg_agent_mode", "both"),
+            "agg_agent_sampling_budget": sql_selection_config.get("agg_agent_sampling_budget", 3),
+            "agg_agent_verify_loop": sql_selection_config.get("agg_agent_verify_loop", False),
         }
         
         # llm extractor config (retry settings for parsing)

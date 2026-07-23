@@ -58,3 +58,11 @@ class PromptFactory:
         if _is_spider2_db_type(db_type):
             return SPIDER2_BR_PAIR_SELECTION_PROMPT.format(DATABASE_SCHEMA=database_schema, QUESTION=question, HINT=hint, QUERY_A=query_a, RESULT_A=result_a, QUERY_B=query_b, RESULT_B=result_b, DATABASE_ENGINE=db_type.upper())
         return BR_PAIR_SELECTION_PROMPT.format(DATABASE_SCHEMA=database_schema, QUESTION=question, HINT=hint, QUERY_A=query_a, RESULT_A=result_a, QUERY_B=query_b, RESULT_B=result_b)
+
+    @staticmethod
+    def format_agg_agent_selection_prompt(database_schema: str, question: str, hint: str, candidates_block: str) -> str:
+        return AGG_AGENT_SELECTION_PROMPT.format(DATABASE_SCHEMA=database_schema, QUESTION=question, HINT=hint, CANDIDATES_BLOCK=candidates_block)
+
+    @staticmethod
+    def format_agg_agent_verify_prompt(database_schema: str, question: str, hint: str, proposed_sql: str, proposed_result: str) -> str:
+        return AGG_AGENT_VERIFY_PROMPT.format(DATABASE_SCHEMA=database_schema, QUESTION=question, HINT=hint, PROPOSED_SQL=proposed_sql, PROPOSED_RESULT=proposed_result)

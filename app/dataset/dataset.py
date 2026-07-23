@@ -240,44 +240,53 @@ class BirdDataset(BaseDataset):
         data_path = Path(self._config.root_path) / self._config.split / f"{self._config.split}.json"
         with open(data_path, "r") as f:
             data_list = json.load(f)
-        
-        if self._config.max_samples is not None:
-            data_list = data_list[:self._config.max_samples]
-            
+
+        difficulty_whitelist = set(self._config.difficulties) if self._config.difficulties else None
+        max_per_diff = self._config.max_samples_per_difficulty
+        max_per_db_diff = self._config.max_samples_per_db_per_difficulty
+        max_per_db = self._config.max_samples_per_db
+        max_total = self._config.max_samples
+
         data = []
-        db_sample_count = {}  # Track samples per database
-        
+        db_count: Dict[str, int] = {}
+        diff_count: Dict[str, int] = {}
+        db_diff_count: Dict[tuple, int] = {}
+
         for data_item in tqdm(data_list, desc="Loading data"):
-            question_id = data_item.get("question_id")
-            question = data_item.get("question")
-            evidence = data_item.get("evidence")
-            gold_sql = data_item.get("SQL")
             difficulty = data_item.get("difficulty")
             database_id = data_item.get("db_id")
-            
-            # Check if we've reached the max samples per database limit
-            if self._config.max_samples_per_db is not None:
-                if db_sample_count.get(database_id, 0) >= self._config.max_samples_per_db:
-                    continue  # Skip this sample
-            
+
+            if difficulty_whitelist is not None and difficulty not in difficulty_whitelist:
+                continue
+            if max_per_db_diff is not None and db_diff_count.get((database_id, difficulty), 0) >= max_per_db_diff:
+                continue
+            if max_per_db is not None and db_count.get(database_id, 0) >= max_per_db:
+                continue
+            if max_per_diff is not None and diff_count.get(difficulty, 0) >= max_per_diff:
+                continue
+
             database_path = self._get_database_path(database_id)
             database_schema = self._load_database_schema(database_id)
             data.append(
                 DataItem(
-                    question_id=question_id,
-                    question=question,
-                    evidence=evidence,
-                    gold_sql=gold_sql,
+                    question_id=data_item.get("question_id"),
+                    question=data_item.get("question"),
+                    evidence=data_item.get("evidence"),
+                    gold_sql=data_item.get("SQL"),
                     difficulty=difficulty,
                     database_id=database_id,
                     database_path=database_path,
                     database_schema=database_schema,
                 )
             )
-            
-            # Increment the count for this database
-            db_sample_count[database_id] = db_sample_count.get(database_id, 0) + 1
-        
+
+            db_count[database_id] = db_count.get(database_id, 0) + 1
+            diff_count[difficulty] = diff_count.get(difficulty, 0) + 1
+            db_diff_count[(database_id, difficulty)] = db_diff_count.get((database_id, difficulty), 0) + 1
+
+            if max_total is not None and len(data) >= max_total:
+                break
+
         return data
         
     def _get_database_path(self, database_id: str):

@@ -7,16 +7,19 @@ import sys
 sys.path.append(".")
 
 import os
+import json
 import argparse
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
 from tqdm import tqdm
 import numpy as np
 
 from app.db_utils.defaults import DEFAULT_SQL_EXECUTION_TIMEOUT
 from app.logger import configure_logger, logger
+
+DIFFICULTY_ORDER = ["simple", "moderate", "challenging"]
 
 
 def _resolve_snapshot_path(snapshot_path: Optional[str], default_snapshot_path: Optional[str] = None) -> str:
@@ -46,54 +49,91 @@ def _eval_ex_after_selection(pred_sql: str, gold_sql: str, db_path: str) -> Opti
     return 1 if set(pred_result.result_rows) == set(gold_result.result_rows) else 0
 
 
-def evaluate_spider_bird(snapshot_path: str, max_workers: int = 32) -> float:
+def _bucket_metrics(items: List[Tuple[str, str, Optional[int]]]) -> Dict[str, Any]:
+    """Aggregate (db, difficulty, ex_result) tuples. ex_result is 1/0 or None when gold failed."""
+    evaluable = [r for *_, r in items if r is not None]
+    n_total = len(items)
+    n_eval = len(evaluable)
+    n_correct = int(sum(evaluable))
+    ex = (n_correct / n_eval) if n_eval > 0 else None
+    return {"ex": ex, "correct": n_correct, "total": n_total, "evaluable": n_eval}
+
+
+def _format_pct(n_correct: int, n_eval: int) -> str:
+    if n_eval == 0:
+        return "n/a (0 evaluable)"
+    return f"{100 * n_correct / n_eval:6.2f}%  ({n_correct}/{n_eval})"
+
+
+def _log_metrics_table(metrics: Dict[str, Any]) -> None:
+    o = metrics["overall"]
+    logger.info("=" * 70)
+    logger.info(f"  Overall EX:  {_format_pct(o['correct'], o['evaluable'])}   [items: {o['total']}, evaluable: {o['evaluable']}]")
+    if metrics.get("by_difficulty"):
+        logger.info("-" * 70)
+        logger.info("  By difficulty:")
+        for diff, b in metrics["by_difficulty"].items():
+            label = diff if diff else "(none)"
+            logger.info(f"    {label:<14} {_format_pct(b['correct'], b['evaluable'])}")
+    if metrics.get("by_database"):
+        logger.info("-" * 70)
+        logger.info("  By database:")
+        for db, b in metrics["by_database"].items():
+            logger.info(f"    {db:<28} {_format_pct(b['correct'], b['evaluable'])}")
+    logger.info("=" * 70)
+
+
+def evaluate_spider_bird(snapshot_path: str, max_workers: int = 32) -> Dict[str, Any]:
     """
     Evaluate Spider or BIRD dataset using direct SQL execution comparison.
-    
-    Args:
-        snapshot_path: Path to the dataset snapshot with results.
-        max_workers: Number of parallel workers.
-        
-    Returns:
-        Execution accuracy as a float (0.0 to 1.0).
+    Returns a metrics dict with overall, by_difficulty, by_database breakdowns.
     """
     from app.dataset import load_dataset
-    
+
     logger.info(f"Loading dataset snapshot from: {snapshot_path}")
     dataset = load_dataset(snapshot_path)
-    
+
     logger.info(f"Evaluating {len(dataset)} queries with {max_workers} workers...")
     executor = ProcessPoolExecutor(max_workers=max_workers)
-    all_futures = [
+    future_to_tag: Dict[Any, Tuple[str, str]] = {
         executor.submit(
             _eval_ex_after_selection,
             data_item.final_selected_sql,
             data_item.gold_sql,
-            data_item.database_path
-        )
+            data_item.database_path,
+        ): (data_item.database_id, data_item.difficulty or "")
         for data_item in dataset
-    ]
-    
-    selected_results = []
-    for future in tqdm(as_completed(all_futures), total=len(all_futures), desc="Evaluating SQL"):
-        selected_result = future.result()
-        if selected_result is not None:
-            selected_results.append(selected_result)
-        else:
-            logger.warning("Gold SQL execution failed for one query")
-        
-        # Show progress
-        if len(selected_results) > 0 and len(selected_results) % 10 == 0:
-            current_acc = np.mean(selected_results) * 100
-            logger.info(f"[Progress] {len(selected_results)}/{len(dataset)} queries - Current EX: {current_acc:.2f}%")
-    
+    }
+
+    per_item: List[Tuple[str, str, Optional[int]]] = []
+    for future in tqdm(as_completed(future_to_tag), total=len(future_to_tag), desc="Evaluating SQL"):
+        db_id, difficulty = future_to_tag[future]
+        result = future.result()
+        if result is None:
+            logger.warning(f"Gold SQL execution failed for db={db_id}")
+        per_item.append((db_id, difficulty, result))
+
+        evaluable_so_far = [r for _, _, r in per_item if r is not None]
+        if len(per_item) % 10 == 0 and evaluable_so_far:
+            logger.info(f"[Progress] {len(per_item)}/{len(dataset)} queries - Current EX: {100*np.mean(evaluable_so_far):.2f}%")
+
     executor.shutdown()
-    
-    if len(selected_results) == 0:
-        logger.error("No valid results to evaluate!")
-        return 0.0
-    
-    return np.mean(selected_results)
+
+    overall = _bucket_metrics(per_item)
+
+    def _diff_key(d: str) -> tuple:
+        return (DIFFICULTY_ORDER.index(d), d) if d in DIFFICULTY_ORDER else (len(DIFFICULTY_ORDER), d)
+
+    by_difficulty = {
+        d: _bucket_metrics([x for x in per_item if x[1] == d])
+        for d in sorted({x[1] for x in per_item}, key=_diff_key)
+    }
+    by_database = {
+        db: _bucket_metrics([x for x in per_item if x[0] == db])
+        for db in sorted({x[0] for x in per_item})
+    }
+
+    return {"overall": overall, "by_difficulty": by_difficulty, "by_database": by_database}
 
 
 def evaluate_spider2(
@@ -209,6 +249,7 @@ def run_evaluation(
     timeout: int = None,
     sql_output_dir: str = None,
     skip_conversion: bool = False,
+    output_path: Optional[str] = None,
     default_snapshot_path: Optional[str] = None,
     default_dataset_type: Optional[str] = None,
     default_dataset_split: Optional[str] = None,
@@ -250,11 +291,26 @@ def run_evaluation(
     # Route to appropriate evaluation method
     if dataset_type in ["spider", "bird"]:
         logger.info(f"=== Evaluating {dataset_type.upper()} Dataset ===")
-        accuracy = evaluate_spider_bird(snapshot_path=snapshot_path, max_workers=max_workers)
-        logger.info(f"\n{'='*60}")
-        logger.info(f"  Overall Execution Accuracy: {accuracy * 100:.2f}%")
-        logger.info(f"{'='*60}\n")
-        return accuracy
+        metrics = evaluate_spider_bird(snapshot_path=snapshot_path, max_workers=max_workers)
+        _log_metrics_table(metrics)
+
+        # Default JSON path: alongside the snapshot, e.g. dev.snapshot -> dev.snapshot.eval.json
+        if output_path is None:
+            snap = Path(snapshot_path)
+            output_path = snap.with_name(snap.name + ".eval.json")
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "snapshot_path": str(snapshot_path),
+            "dataset_type": dataset_type,
+            "split": dataset_split or default_dataset_split,
+            **metrics,
+        }
+        output_path.write_text(json.dumps(payload, indent=2))
+        logger.info(f"Eval metrics saved to: {output_path}")
+
+        overall_ex = metrics["overall"]["ex"]
+        return overall_ex if overall_ex is not None else 0.0
         
     elif dataset_type == "spider2":
         logger.info(f"=== Evaluating Spider2-{dataset_split.upper()} Dataset ===")
@@ -325,7 +381,13 @@ def main():
         action="store_true",
         help="Skip snapshot-to-SQL conversion for Spider2 (use existing SQL files)"
     )
-    
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Path to write the eval metrics JSON (Spider/BIRD). Default: <snapshot>.eval.json"
+    )
+
     args = parser.parse_args()
     from app.config import get_config
 
@@ -340,6 +402,7 @@ def main():
         timeout=args.timeout,
         sql_output_dir=args.sql_output_dir,
         skip_conversion=args.skip_conversion,
+        output_path=args.output,
         default_snapshot_path=app_config.sql_selection_config.save_path,
         default_dataset_type=app_config.dataset_config.type,
         default_dataset_split=app_config.dataset_config.split,

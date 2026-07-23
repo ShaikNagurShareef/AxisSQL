@@ -13,6 +13,7 @@ from tqdm import tqdm
 import time
 from app.services import ArtifactStore, STAGE_ARTIFACT_FIELDS, configure_execution_service, configure_schema_service, get_execution_service, get_schema_service, load_stage_dataset, reset_execution_service, reset_schema_service
 from app.llm_extractor import LLMExtractor
+from app.pipeline.sql_selection.agg_agent import select_via_agg_agent
 
 
 class SQLSelectionRunner:
@@ -331,6 +332,37 @@ class SQLSelectionRunner:
             }
             return
         
+        # AggAgent strategy: single-prompt LLM-as-aggregator over all candidates.
+        if getattr(self._stage_config, "strategy", "pairwise") == "agg_agent":
+            try:
+                final_sql, token_usage = select_via_agg_agent(
+                    data_item=data_item,
+                    top_k_sql_candidates=top_k_sql_candidates,
+                    llm=self._llm,
+                    extractor=self._extractor,
+                    execution_service=self._execution_service,
+                    schema_service=get_schema_service(),
+                    sampling_budget=self._stage_config.agg_agent_sampling_budget,
+                    mode=self._stage_config.agg_agent_mode,
+                    verify_loop=getattr(self._stage_config, "agg_agent_verify_loop", False),
+                )
+                data_item.final_selected_sql = final_sql
+                total_token_usage["prompt_tokens"] += token_usage["prompt_tokens"]
+                total_token_usage["completion_tokens"] += token_usage["completion_tokens"]
+                total_token_usage["total_tokens"] += token_usage["total_tokens"]
+            except Exception as e:
+                logger.error(f"AggAgent failed for item {data_item.question_id}: {e}; falling back to top-1 candidate")
+                data_item.final_selected_sql = top_k_sql_candidates[0][0]
+            data_item.sql_selection_time = time.time() - start_time
+            data_item.sql_selection_llm_cost = total_token_usage
+            data_item.total_time += data_item.sql_selection_time
+            data_item.total_llm_cost = {
+                "prompt_tokens": data_item.total_llm_cost["prompt_tokens"] + data_item.sql_selection_llm_cost["prompt_tokens"],
+                "completion_tokens": data_item.total_llm_cost["completion_tokens"] + data_item.sql_selection_llm_cost["completion_tokens"],
+                "total_tokens": data_item.total_llm_cost["total_tokens"] + data_item.sql_selection_llm_cost["total_tokens"],
+            }
+            return
+
         # using pair-wise comparison to select the best sql
         database_schema_profile = get_schema_service().build_schema_profile(
             data_item.database_schema_after_schema_linking,

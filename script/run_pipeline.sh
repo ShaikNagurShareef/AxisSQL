@@ -47,6 +47,60 @@ echo -e "\nStep 1: Dataset Preprocessing..."
 uv run runner/preprocess_dataset.py
 if [ $? -ne 0 ]; then echo "Preprocessing failed!"; exit 1; fi
 
+# 1b. Stale-snapshot check: downstream stage snapshots whose num_items
+# disagrees with the fresh dataset snapshot are leftovers from a previous
+# run (e.g. ran with 500 samples, now running with 11). Offer to clear.
+echo -e "\nChecking for stale downstream snapshots..."
+STALE_PATHS=$(uv run python - <<'PYEOF'
+import json
+from pathlib import Path
+from app.config import get_config
+
+cfg = get_config()
+dataset_path = Path(cfg.dataset_config.save_path)
+if not dataset_path.exists():
+    raise SystemExit(0)
+try:
+    dataset_n = json.loads(dataset_path.read_text()).get("num_items")
+except Exception:
+    raise SystemExit(0)
+
+downstream = [
+    cfg.value_retrieval_config.save_path,
+    cfg.schema_linking_config.save_path,
+    cfg.sql_generation_config.save_path,
+    cfg.sql_revision_config.save_path,
+    cfg.sql_selection_config.save_path,
+]
+for p in downstream:
+    p = Path(p)
+    if not p.exists():
+        continue
+    try:
+        n = json.loads(p.read_text()).get("num_items")
+    except Exception:
+        continue
+    if n is not None and dataset_n is not None and n != dataset_n:
+        print(str(p))
+PYEOF
+)
+
+if [ -n "$STALE_PATHS" ]; then
+    echo "Stale downstream snapshots (item counts differ from the dataset):"
+    echo "$STALE_PATHS" | sed 's/^/  - /'
+    read -p "Clear these snapshots and restart downstream stages from scratch? [y/N] " -r STALE_REPLY < /dev/tty
+    if [[ "$STALE_REPLY" =~ ^[Yy]$ ]]; then
+        while IFS= read -r path; do
+            rm -rf "$path" "${path}.data"
+            echo "  cleared: $path"
+        done <<< "$STALE_PATHS"
+    else
+        echo "Keeping existing snapshots; downstream stages will operate on stale item sets."
+    fi
+else
+    echo "No stale downstream snapshots detected."
+fi
+
 # 2. Create Vector Database
 echo -e "\nStep 2: Creating Vector Database (Parallel)..."
 uv run runner/create_vector_db_parallel.py
@@ -76,6 +130,16 @@ if [ $? -ne 0 ]; then echo "SQL revision failed!"; exit 1; fi
 echo -e "\nStep 7: SQL Selection..."
 uv run runner/run_sql_selection.py
 if [ $? -ne 0 ]; then echo "SQL selection failed!"; exit 1; fi
+
+# 8. Export predictions JSON ({question_id: predicted_sql})
+echo -e "\nStep 8: Exporting predictions JSON..."
+uv run runner/convert_snapshot_to_sql.py
+if [ $? -ne 0 ]; then echo "Predictions export failed!"; exit 1; fi
+
+# 9. Evaluation
+echo -e "\nStep 9: Evaluation..."
+uv run runner/evaluation.py
+if [ $? -ne 0 ]; then echo "Evaluation failed!"; exit 1; fi
 
 echo -e "\n=============================================================================="
 echo "Pipeline completed successfully!"
