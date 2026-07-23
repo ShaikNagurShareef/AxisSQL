@@ -396,10 +396,64 @@ uv run script/scaling_curve.py \
 
 ## BIRD Bench Test Set Submission
 
-The BIRD Bench **test set** is hidden (no gold SQL, not publicly downloadable) and is scored centrally by the BIRD team.
-To get official Execution Accuracy (EX) / R-VES scores:
+The BIRD Bench **test set** is hidden (`test.json` ships with `"SQL": ""`) and is scored centrally by BIRD's Eval Team.
+This section covers everything AxisSQL needs for that submission, per BIRD's official Submission Guideline.
 
-1. **Request the test set**: email `bird.bench23@gmail.com` and follow BIRD's Submission Guideline to receive `test.json` and `test_databases/`.
+### Which evaluation track applies
+
+All four AxisSQL models (Gemma-3-27B, Gemma-4-31B, Qwen2.5-Coder-32B, Qwen3-Coder-30B-A3B) are ≤34B parameters, so this
+is a **Type 1: Single A100 80G GPU Inference** submission — the simplest track (Readme + code + `requirements.txt`,
+model push to Hugging Face optional). None of these models are fine-tuned; all are used as their official public
+checkpoints, so there is nothing new to upload:
+
+| Model | Hugging Face |
+| --- | --- |
+| Gemma-3-27B | [google/gemma-3-27b-it](https://huggingface.co/google/gemma-3-27b-it) |
+| Gemma-4-31B | [google/gemma-4-31B-it](https://huggingface.co/google/gemma-4-31B-it) |
+| Qwen2.5-Coder-32B | [Qwen/Qwen2.5-Coder-32B-Instruct](https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct) |
+| Qwen3-Coder-30B-A3B | [Qwen/Qwen3-Coder-30B-A3B-Instruct](https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct) |
+
+### API keys — what's actually needed
+
+- **LLM stage** (`[*.llm]` blocks): none of the vLLM/ngrok-served open models enforce a real key — any placeholder
+  string in `api_key` works, since auth is handled by the tunnel/network layer, not the model server.
+- **Embedding stage** (`[vector_database]`): defaults to `api_type = "openai"` (`text-embedding-3-small`), which
+  **does** require a real `OPENAI_API_KEY`. To avoid handing any external key to BIRD's Eval Team at all, switch to:
+  ```toml
+  [vector_database]
+  api_type = "local"
+  embedding_model_name_or_path = "<a local sentence-transformers or Qwen3-Embedding model>"
+  embedding_device = "auto"
+  ```
+  This runs entirely on your own GPU (`app/vector_db/vector_db.py`) — no key required anywhere in the pipeline, and
+  keeps the submission on the simpler GPU-only track instead of the API-key track.
+- If you do keep the OpenAI embedding key: per BIRD's guideline, provide it to the Eval Team for their run and
+  **reset/rotate it once evaluation completes**.
+
+### Compliance notes (per BIRD's guideline)
+
+- **No data exfiltration risk**: SQL execution is a local, read-only `sqlite3` connection
+  (`app/db_utils/execution.py`) — the database files themselves are never uploaded or transmitted anywhere. The only
+  outbound network calls are the OpenAI-compatible requests to whichever `base_url` you configure per `[*.llm]` /
+  `[vector_database]` block (your own model server, or OpenAI if you keep the default embedding config).
+- **No reliance on gold SQL**: `gold_sql` is only read in one place outside evaluation —
+  `app/pipeline/schema_linking/schema_linking.py`'s `_eval_schema_linking_recall`, a read-only diagnostic metric
+  computed *after* schema linking has already made its decisions. It never influences generation, revision, or
+  selection, and is explicitly skip-guarded when `gold_sql` is empty (`dataset.py`'s `BirdDataset` maps a missing/blank
+  `"SQL"` field to `""`) — i.e. it degrades to a no-op on the real test set.
+- **`test_tables.json`**: **not needed.** Schema is introspected directly from each `test_databases/{db_id}/{db_id}.sqlite`
+  file (`app/dataset/dataset.py`'s `_load_database_schema`), not from a separate tables manifest.
+- **`column_meaning.json`**: **not needed.** AxisSQL doesn't reference this file; it optionally reads BIRD's older
+  per-database `database_description/*.csv` files when present (`app/db_utils/schema.py`) and logs a warning and
+  continues gracefully when they're absent (verified — this is exactly how the current mini-dev configs already run).
+- **Logging & restart-from-error**: every stage writes structured `.snapshot` checkpoints (see
+  [Reproducibility](#reproducibility)) that let you resume without re-running prior stages, and
+  `script/run_pipeline.sh` tees all stage output to a timestamped file under `logs/`.
+
+### Step-by-step: generating test-set predictions
+
+1. **Request the test set**: email `bird.bench23@gmail.com` with your submission materials and follow BIRD's
+   Submission Guideline to receive `test.json` and `test_databases/`.
 2. **Place the data**: `data/bird/test/test.json` and `data/bird/test/test_databases/{db_id}/{db_id}.sqlite`.
 3. **Create a test-split config**: copy an existing config and switch every `dev` path to `test` — `split`, `root_path`, and every `dev`-named snapshot/storage path (`[dataset].save_path`, `[vector_database].store_root_path`, and each `[*.llm]` stage's sibling `save_path`). All of these follow a `bird/dev...` path convention, so one `sed` pass handles it:
 
@@ -416,7 +470,7 @@ export CONFIG_PATH=config/config-bird-vllm-qwen3coder-test.toml
 
 `icl_few_shot_examples_path` intentionally keeps pointing at `results/bird_dev_few_shots.json` — those ICL examples come from the labeled dev set regardless of which split you're generating for.
 
-4. **Run the pipeline** exactly as in [Quick Start](#quick-start) (`preprocess_dataset.py` → ... → `run_sql_selection.py`). The test split has no gold SQL, so `runner/evaluation.py` cannot score it locally — that's expected.
+4. **Run the pipeline** exactly as in [Quick Start](#quick-start) (`preprocess_dataset.py` → ... → `run_sql_selection.py`). The test split has no gold SQL, so `runner/evaluation.py` correctly reports "not evaluable" rather than a score — that's expected.
 5. **Generate the submission file** in BIRD's official format. With `CONFIG_PATH` still exported from step 3, `--snapshot_path` can be omitted — it's read from `[sql_selection].save_path` in your config:
 
 ```bash
@@ -427,7 +481,20 @@ uv run runner/convert_snapshot_to_sql.py \
 
 This produces `{question_id: "sql_query\t----- bird -----\tdb_id"}`, the exact format BIRD's evaluation harness expects.
 
-6. **Submit**: send `predict_test.json` to the BIRD team per their Submission Guideline; they typically return scores within ~10 days.
+### Submission checklist
+
+Per BIRD's guideline, a Type 1 submission to `bird.bench23@gmail.com` should include:
+
+- [ ] **This README** (submission instructions + commands — already covers setup, config, running the pipeline, and generating predictions).
+- [ ] **Code zip** — compressed repo excluding local/generated state:
+  ```bash
+  zip -r axissql_submission.zip . -x ".git/*" ".venv/*" "workspace/*" "data/*" "*.pyc" "__pycache__/*"
+  ```
+- [ ] **`requirements.txt`** (already included in this repo, generated via `uv export`) — install with `pip install -r requirements.txt`, or use `uv sync` directly with `pyproject.toml`/`uv.lock`. This package itself has no CUDA-specific pins; CUDA 12.2/12.3 compatibility applies to whatever model-serving stack (e.g. vLLM) you run separately to expose the `[*.llm]` endpoints — verify that against your own serving setup.
+- [ ] **Models/keys** — the Hugging Face links above (no custom checkpoints to upload); an `OPENAI_API_KEY` only if you keep OpenAI embeddings instead of switching to local.
+- [ ] **`column_meaning.json` usage statement** — not needed (see Compliance notes above).
+- [ ] **Dev SQL predictions** — already included at [results/bird-dev/](results/bird-dev/) (`gemma3-27b.json`, `qwen2.5-coder-32b.json`, `qwen3-coder-30b-a3b.json`). These predate the `--dataset_type bird` official-format change and are plain `{question_id: sql}` (no `db_id` suffix); regenerate with `--dataset_type bird` on a dev-split config if BIRD needs the `db_id`-suffixed format for dev too.
+- [ ] **`predict_test.json`** generated in step 5 above (or send it once BIRD's Exp Team runs your code, per their workflow).
 
 ## Artifacts
 
