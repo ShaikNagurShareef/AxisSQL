@@ -58,8 +58,9 @@ class DatasetConfig(BaseModel):
             if self.split not in ["dev", "test"]:
                 raise ValueError(f"Invalid split: {self.split}")
         elif self.type == "bird":
-            # only dev split is supported for bird dataset
-            if self.split not in ["dev"]:
+            # dev split is used for scaling experiments; test split is the hidden
+            # BIRD Bench test set (no gold SQL) used for official leaderboard submission
+            if self.split not in ["dev", "test"]:
                 raise ValueError(f"Invalid split: {self.split}")
         elif self.type == "spider2":
             # Spider2 supports lite and snow splits

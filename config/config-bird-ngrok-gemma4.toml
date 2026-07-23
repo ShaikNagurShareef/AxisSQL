@@ -3,7 +3,6 @@
 print_level = "INFO"      # Console log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 ########## Dataset configuration ##########
-# Shared with the Gemma config: dataset preprocessing is LLM-independent.
 [dataset]
 type = "bird"
 split = "dev"             # "dev" for scaling experiments; "test" for the hidden BIRD Bench test set (no gold SQL)
@@ -17,7 +16,6 @@ save_path = "workspace/dataset/bird/dev.snapshot"
 # difficulties = ["simple", "moderate", "challenging"]   # whitelist; omit to keep all
 
 ########## Vector database configuration ##########
-# Shared with the Gemma config: embeddings depend on the OpenAI embedding model, not the SQL LLM.
 [vector_database]
 api_type = "openai"
 embedding_model_name_or_path = "text-embedding-3-small"
@@ -33,105 +31,103 @@ column_parallel = 8
 build_backend = "local_index"   # chroma | local_index | both
 
 ########## Value retrieval configuration ##########
-# LLM-dependent: Qwen-specific snapshot path so Gemma results aren't overwritten.
 [value_retrieval]
 n_results = 5
 n_parallel = 8   # number of samples to process in parallel
 query_parallel_per_sample = 16   # concurrent Chroma column queries allowed within one sample
 backend = "local_index"   # use "chroma" to keep the original backend
 local_index_device = "auto"   # auto | cpu | cuda | cuda:0 | cuda:1
-save_path = "workspace/value_retrieval/bird/dev-qwen.snapshot"
+save_path = "workspace/value_retrieval/bird/dev.snapshot"
 
+# Gemma-4 served through an ngrok tunnel (OpenAI-compatible endpoint).
+# base_url uses the "/v1" suffix required by the OpenAI SDK (app/llm/llm.py) to
+# reach "<base_url>/chat/completions" -> "https://ustllm.ngrok.app/v1/chat/completions".
+# Adjust `model` to match the --served-model-name configured on the tunneled server.
 [value_retrieval.llm]
-model = "Qwen3-Coder-Next"
-base_url = "http://10.31.207.8:8001/v1"
-api_key = "your-vllm-api-key-here"
+model = "gemma-4-31b-it"
+base_url = "https://ustllm.ngrok.app/v1"
+api_key = "your-ngrok-api-key-here"
 max_tokens = 4096
 temperature = 0.7
 api_type = "openai"
-max_model_len = 128000
+max_model_len = 32768
 
 ########## Schema linking configuration ##########
 [schema_linking]
 n_parallel = 8
 n_internal_parallel = 3   # max workers within a single sample (direct/reversed/value linkers)
-save_path = "workspace/schema_linking/bird/dev-qwen.snapshot"
+save_path = "workspace/schema_linking/bird/dev.snapshot"
 direct_linking_sampling_budget = 4
 reversed_linking_sampling_budget = 4
 value_distance_threshold = 0.02
 
 [schema_linking.llm]
-model = "Qwen3-Coder-Next"
-base_url = "http://10.31.207.8:8001/v1"
-api_key = "your-vllm-api-key-here"
+model = "gemma-4-31b-it"
+base_url = "https://ustllm.ngrok.app/v1"
+api_key = "your-ngrok-api-key-here"
 max_tokens = 4096
 temperature = 0.7
 api_type = "openai"
-max_model_len = 128000
+max_model_len = 32768
 
 ########## SQL generation configuration ##########
 [sql_generation]
 n_parallel = 8
 n_internal_parallel = 3   # max workers within a single sample (dc/skeleton/icl generators)
-save_path = "workspace/sql_generation/bird/dev-qwen.snapshot"
+save_path = "workspace/sql_generation/bird/dev.snapshot"
 dc_sampling_budget = 4
 skeleton_sampling_budget = 4
 icl_sampling_budget = 4
 icl_few_shot_examples_path = "results/bird_dev_few_shots.json"
 
 [sql_generation.llm]
-model = "Qwen3-Coder-Next"
-base_url = "http://10.31.207.8:8001/v1"
-api_key = "your-vllm-api-key-here"
+model = "gemma-4-31b-it"
+base_url = "https://ustllm.ngrok.app/v1"
+api_key = "your-ngrok-api-key-here"
 max_tokens = 4096
 temperature = 0.7
 api_type = "openai"
-max_model_len = 128000
+max_model_len = 32768
 
 ########## SQL revision configuration ##########
 [sql_revision]
 n_parallel = 8
 n_internal_parallel = 16   # max workers within a single sample (revising unique candidates)
-save_path = "workspace/sql_revision/bird/dev-qwen.snapshot"
+save_path = "workspace/sql_revision/bird/dev.snapshot"
 checker_sampling_budget = 3
 
 [sql_revision.llm]
-model = "Qwen3-Coder-Next"
-base_url = "http://10.31.207.8:8001/v1"
-api_key = "your-vllm-api-key-here"
+model = "gemma-4-31b-it"
+base_url = "https://ustllm.ngrok.app/v1"
+api_key = "your-ngrok-api-key-here"
 max_tokens = 4096
 temperature = 0.7
 api_type = "openai"
-max_model_len = 128000
+max_model_len = 32768
 
 ########## SQL selection configuration ##########
 [sql_selection]
 n_parallel = 16
 n_internal_parallel = 8   # max workers within a single sample (pairwise SQL comparison)
-save_path = "workspace/sql_selection/bird/dev-qwen.snapshot"
+save_path = "workspace/sql_selection/bird/dev.snapshot"
 filter_top_k_sql = 2
 evaluator_sampling_budget = 5
 shortcut_consistency_score_threshold = 0.6
 # AggAgent: LLM-as-aggregator alternative to the pairwise tournament.
 # Set strategy = "agg_agent" to enable. Leave "pairwise" to keep the existing behavior.
 # strategy = "agg_agent"
-# agg_agent_mode = "both"                        # "pick" | "synthesize" | "both"
-# agg_agent_sampling_budget = 3                  # self-consistency samples for Round-1
-# agg_agent_verify_loop = true                   # DEPRECATED: same as max_refine_rounds = 1
-# Phase A: execution-driven iterative refinement after Round-1.
-# agg_agent_max_refine_rounds = 3                # 0=off, 1=verify-once, N=multi-round refinement
-# Phase B: question decomposition for complex items (triggered by disagreement heuristic).
-# agg_agent_decomposition_enabled = true         # decompose -> sub-SQLs -> recompose, added as an extra candidate
-# agg_agent_decomposition_min_disagreement = 3   # trigger only when top-k yields >= this many distinct result clusters
+# agg_agent_mode = "both"          # "pick" | "synthesize" | "both"
+# agg_agent_sampling_budget = 3    # self-consistency samples
+# agg_agent_verify_loop = true     # Round-2 LLM call that re-examines Round-1 SQL with its execution result
 
 [sql_selection.llm]
-model = "Qwen3-Coder-Next"
-base_url = "http://10.31.207.8:8001/v1"
-api_key = "your-vllm-api-key-here"
+model = "gemma-4-31b-it"
+base_url = "https://ustllm.ngrok.app/v1"
+api_key = "your-ngrok-api-key-here"
 max_tokens = 4096
 temperature = 0.7
 api_type = "openai"
-max_model_len = 128000
+max_model_len = 32768
 
 ########## LLM extractor configuration ##########
 [llm_extractor]
