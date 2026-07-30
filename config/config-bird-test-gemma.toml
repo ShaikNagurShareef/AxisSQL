@@ -1,0 +1,133 @@
+########## Logger configuration ##########
+[logger]
+print_level = "INFO"      # Console log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+########## Dataset configuration ##########
+[dataset]
+type = "bird"
+split = "test"             # "dev" for scaling experiments; "test" for the hidden BIRD Bench test set (no gold SQL)
+root_path = "/data/bird/test"
+save_path = "workspace/dataset/bird/test.snapshot"
+# max_samples = 11       # Cap on total samples loaded (optional, applied last)
+# max_samples_per_db = 1  # Cap on samples per database (optional)
+# BIRD-only filters (use 'difficulty' field: simple / moderate / challenging)
+# max_samples_per_db_per_difficulty = 2   # 1 per (db, difficulty) -> 11 dbs x 3 diffs = 33 samples
+# max_samples_per_difficulty = 1         # global cap per difficulty
+# difficulties = ["simple", "moderate", "challenging"]   # whitelist; omit to keep all
+
+########## Vector database configuration ##########
+[vector_database]
+api_type = "openai"
+embedding_model_name_or_path = "text-embedding-3-small"
+base_url = "https://api.openai.com/v1"
+api_key = "your-openai-api-key-here"
+store_root_path = "workspace/vector_database/bird/test"
+embedding_device = "auto"   # auto | cpu | cuda | cuda:0
+max_value_length = 100
+lower_meta_data = true
+batch_size = 128
+db_parallel = 4
+column_parallel = 8
+build_backend = "local_index"   # chroma | local_index | both
+
+########## Value retrieval configuration ##########
+[value_retrieval]
+n_results = 5
+n_parallel = 8   # number of samples to process in parallel
+query_parallel_per_sample = 16   # concurrent Chroma column queries allowed within one sample
+backend = "local_index"   # use "chroma" to keep the original backend
+local_index_device = "auto"   # auto | cpu | cuda | cuda:0 | cuda:1
+save_path = "workspace/value_retrieval/bird/test.snapshot"
+
+# Gemma-4 served locally by vLLM on this machine (BIRD Exp Team's own A100).
+# See README "Serving Gemma-4-31B for the test submission" for the exact vllm serve command
+# that matches this model/port/max_model_len.
+[value_retrieval.llm]
+model = "google/gemma-4-31B-it"
+base_url = "http://127.0.0.1:30011/v1"
+api_key = "your-vllm-api-key-here"
+max_tokens = 4096
+temperature = 0.7
+api_type = "openai"
+max_model_len = 32768
+
+########## Schema linking configuration ##########
+[schema_linking]
+n_parallel = 8
+n_internal_parallel = 3   # max workers within a single sample (direct/reversed/value linkers)
+save_path = "workspace/schema_linking/bird/test.snapshot"
+direct_linking_sampling_budget = 4
+reversed_linking_sampling_budget = 4
+value_distance_threshold = 0.02
+
+[schema_linking.llm]
+model = "google/gemma-4-31B-it"
+base_url = "http://127.0.0.1:30011/v1"
+api_key = "your-vllm-api-key-here"
+max_tokens = 4096
+temperature = 0.7
+api_type = "openai"
+max_model_len = 32768
+
+########## SQL generation configuration ##########
+[sql_generation]
+n_parallel = 8
+n_internal_parallel = 3   # max workers within a single sample (dc/skeleton/icl generators)
+save_path = "workspace/sql_generation/bird/test.snapshot"
+dc_sampling_budget = 4
+skeleton_sampling_budget = 4
+icl_sampling_budget = 4
+icl_few_shot_examples_path = "results/bird_dev_few_shots.json"
+
+[sql_generation.llm]
+model = "google/gemma-4-31B-it"
+base_url = "http://127.0.0.1:30011/v1"
+api_key = "your-vllm-api-key-here"
+max_tokens = 4096
+temperature = 0.7
+api_type = "openai"
+max_model_len = 32768
+
+########## SQL revision configuration ##########
+[sql_revision]
+n_parallel = 8
+n_internal_parallel = 16   # max workers within a single sample (revising unique candidates)
+save_path = "workspace/sql_revision/bird/test.snapshot"
+checker_sampling_budget = 3
+
+[sql_revision.llm]
+model = "google/gemma-4-31B-it"
+base_url = "http://127.0.0.1:30011/v1"
+api_key = "your-vllm-api-key-here"
+max_tokens = 4096
+temperature = 0.7
+api_type = "openai"
+max_model_len = 32768
+
+########## SQL selection configuration ##########
+[sql_selection]
+n_parallel = 16
+n_internal_parallel = 8   # max workers within a single sample (pairwise SQL comparison)
+save_path = "workspace/sql_selection/bird/test.snapshot"
+filter_top_k_sql = 2
+evaluator_sampling_budget = 5
+shortcut_consistency_score_threshold = 0.6
+# AggAgent: LLM-as-aggregator alternative to the pairwise tournament.
+# Set strategy = "agg_agent" to enable. Leave "pairwise" to keep the existing behavior.
+# strategy = "agg_agent"
+# agg_agent_mode = "both"          # "pick" | "synthesize" | "both"
+# agg_agent_sampling_budget = 3    # self-consistency samples
+# agg_agent_verify_loop = true     # Round-2 LLM call that re-examines Round-1 SQL with its execution result
+
+[sql_selection.llm]
+model = "google/gemma-4-31B-it"
+base_url = "http://127.0.0.1:30011/v1"
+api_key = "your-vllm-api-key-here"
+max_tokens = 4096
+temperature = 0.7
+api_type = "openai"
+max_model_len = 32768
+
+########## LLM extractor configuration ##########
+[llm_extractor]
+max_retry = 5

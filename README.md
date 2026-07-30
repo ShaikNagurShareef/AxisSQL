@@ -229,9 +229,10 @@ AxisSQL includes model-specific BIRD configurations for four open coder models:
 
 - [config/config-bird-vllm-gemma3.toml](config/config-bird-vllm-gemma3.toml) — Gemma-3-27B
 - [config/config-bird-vllm-gemma4.toml](config/config-bird-vllm-gemma4.toml) — Gemma-4-31B (internal vLLM host)
-- [config/config-bird-ngrok-gemma4.toml](config/config-bird-ngrok-gemma4.toml) — Gemma-4-31B served through an ngrok tunnel (`https://ustllm.ngrok.app/v1`)
+- [config/config-bird-ngrok-gemma4.toml](config/config-bird-ngrok-gemma4.toml) — Gemma-4-31B served through an ngrok tunnel (`https://ustllm.ngrok.app/v1`), dev-time testing only
 - [config/config-bird-vllm-qwen2.5coder.toml](config/config-bird-vllm-qwen2.5coder.toml) — Qwen2.5-Coder-32B
 - [config/config-bird-vllm-qwen3coder.toml](config/config-bird-vllm-qwen3coder.toml) — Qwen3-Coder-30B-A3B
+- [config/config-bird-test-gemma.toml](config/config-bird-test-gemma.toml) — Gemma-4-31B, BIRD **test-split** submission config, expects a local vLLM instance (see [Serving Gemma-4-31B for the test submission](#serving-gemma-4-31b-for-the-test-submission))
 
 Legacy example config:
 - [config/config-bird-example.toml](config/config-bird-example.toml)
@@ -415,10 +416,13 @@ checkpoints, so there is nothing new to upload:
 
 ### API keys — what's actually needed
 
-- **LLM stage** (`[*.llm]` blocks): served through the ngrok tunnel at `https://ustllm.ngrok.app/v1`
-  ([config/config-bird-ngrok-gemma4.toml](config/config-bird-ngrok-gemma4.toml)) — this is the required endpoint for
-  submission. It enforces no real key; any placeholder string in `api_key` works, since auth is handled by the
-  tunnel/network layer, not the model server.
+- **LLM stage** (`[*.llm]` blocks): for the actual test submission, served by a **local vLLM instance that BIRD's
+  Exp Team runs themselves** on their own GPU ([config/config-bird-test-gemma.toml](config/config-bird-test-gemma.toml),
+  `http://127.0.0.1:30011/v1` — see [Serving Gemma-4-31B for the test submission](#serving-gemma-4-31b-for-the-test-submission)).
+  No real key is needed there either — the `--api-key` you pass to `vllm serve` is whatever you put in the config's
+  `api_key` field, and vLLM only checks it matches, so any placeholder string works as long as both sides agree.
+  ([config/config-bird-ngrok-gemma4.toml](config/config-bird-ngrok-gemma4.toml) is a separate config used only for
+  our own dev-time testing against a tunneled endpoint — not part of the submission.)
 - **Embedding stage** (`[vector_database]`): defaults to `api_type = "openai"` (`text-embedding-3-small`), which
   requires a real API key — **provide your own `OPENAI_API_KEY`** (set via env var or directly in the config's
   `api_key` field) for this stage. Per BIRD's guideline, hand it to the Eval Team for their run and
@@ -458,6 +462,26 @@ checkpoints, so there is nothing new to upload:
 - **Logging & restart-from-error**: every stage writes structured `.snapshot` checkpoints (see
   [Reproducibility](#reproducibility)) that let you resume without re-running prior stages, and
   `script/run_pipeline.sh` tees all stage output to a timestamped file under `logs/`.
+
+### Serving Gemma-4-31B for the test submission
+
+[config/config-bird-test-gemma.toml](config/config-bird-test-gemma.toml) expects a **local** vLLM server on the same
+machine that runs the pipeline (i.e. BIRD's Exp Team's own GPU for the Type 1 track — not our ngrok tunnel, which is
+only for our own dev-time testing). Before running the pipeline, start vLLM with:
+
+```bash
+vllm serve google/gemma-4-31B-it \
+  --served-model-name google/gemma-4-31B-it \
+  --port 30011 \
+  --max-model-len 32768 \
+  --api-key your-vllm-api-key-here
+```
+
+`--served-model-name` must match the config's `model` field exactly, and `--max-model-len` must match the config's
+`max_model_len` (`32768` — the value we've verified actually works with this model; the model card advertises a
+much larger native context, so this can be raised if your GPU allocation has headroom, but keep the config's
+`max_model_len` in sync with whatever you launch vLLM with). Once vLLM is up and answering on `127.0.0.1:30011`,
+proceed with the pipeline below.
 
 ### Step-by-step: generating test-set predictions
 
