@@ -25,7 +25,7 @@ class DataItem(BaseModel):
     question_id: int = Field(..., description="The question id of the data item")
     question: str = Field(..., description="The question of the data item")
     evidence: str = Field(default="", description="The evidence of the data item")
-    gold_sql: str = Field(..., description="The gold sql of the data item")
+    gold_sql: str = Field(default="", description="The gold sql of the data item")
     difficulty: str = Field(default="", description="The difficulty of the data item")
     database_id: str = Field(..., description="The database id of the data item")
     database_path: str = Field(..., description="The database path of the data item")
@@ -271,9 +271,9 @@ class BirdDataset(BaseDataset):
                 DataItem(
                     question_id=data_item.get("question_id"),
                     question=data_item.get("question"),
-                    evidence=data_item.get("evidence"),
-                    gold_sql=data_item.get("SQL"),
-                    difficulty=difficulty,
+                    evidence=data_item.get("evidence") or "",
+                    gold_sql=data_item.get("SQL") or "",
+                    difficulty=difficulty or "",
                     database_id=database_id,
                     database_path=database_path,
                     database_schema=database_schema,

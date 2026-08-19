@@ -6,7 +6,7 @@ print_level = "INFO"      # Console log level: DEBUG, INFO, WARNING, ERROR, CRIT
 # Shared with the Gemma config: dataset preprocessing is LLM-independent.
 [dataset]
 type = "bird"
-split = "dev"             # Only "dev" split is supported for BIRD
+split = "dev"             # "dev" for scaling experiments; "test" for the hidden BIRD Bench test set (no gold SQL)
 root_path = "data/bird/data_minidev/MINIDEV"
 save_path = "workspace/dataset/bird/dev.snapshot"
 # max_samples = 11       # Cap on total samples loaded (optional, applied last)

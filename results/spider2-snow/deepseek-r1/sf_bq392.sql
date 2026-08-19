@@ -1,1 +1,0 @@
-SELECT "year" || '-' || "mo" || '-' || "da" AS date_formatted FROM "NOAA_GSOD"."NOAA_GSOD"."GSOD2009" WHERE "stn" = '723758' AND "mo" = '10' AND "year" = '2009' AND "temp" != 9999.9 ORDER BY "temp" DESC LIMIT 3

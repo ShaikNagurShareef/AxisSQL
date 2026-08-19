@@ -1,1 +1,0 @@
-SELECT COUNT(DISTINCT `a`.`session`) FROM `form_log` AS `a` JOIN `form_log` AS `b` ON `a`.`session` = `b`.`session` WHERE `a`.`path` = '/regist/input' AND `b`.`path` = '/regist/confirm' AND `a`.`stamp` < `b`.`stamp`

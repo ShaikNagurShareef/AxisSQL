@@ -31,10 +31,12 @@ def _infer_output_format_from_snapshot(snapshot_path: str) -> str:
     return "sql_files" if first_item is not None and hasattr(first_item, "instance_id") else "json"
 
 
-def convert_to_json_file(snapshot_path: str, output_path: Optional[str] = None):
+def convert_to_json_file(snapshot_path: str, output_path: Optional[str] = None, dataset_type: Optional[str] = None):
     """
     Convert a dataset snapshot to a single JSON file (for Spider/Bird datasets).
     Format: {question_id: sql_string}
+    For dataset_type == "bird", follows BIRD's official submission format:
+    {question_id: "sql_string\t----- bird -----\tdb_id"}
     """
     from app.dataset import load_dataset
 
@@ -46,7 +48,11 @@ def convert_to_json_file(snapshot_path: str, output_path: Optional[str] = None):
         if final_sql is None:
             logger.warning(f"Item {item.question_id}: No valid SQL found, using 'Error'")
             final_sql = "Error"
-        data[str(item.question_id)] = final_sql.strip()
+        final_sql = final_sql.strip()
+        if dataset_type == "bird":
+            data[str(item.question_id)] = f"{final_sql}\t----- bird -----\t{item.database_id}"
+        else:
+            data[str(item.question_id)] = final_sql
 
     if output_path is None:
         output_path = _default_json_output_path(snapshot_path)
@@ -108,7 +114,7 @@ def auto_convert(
             logger.info(f"Auto-detected format '{output_format}' for dataset type '{dataset_type}'")
 
     if output_format == "json":
-        convert_to_json_file(snapshot_path, output_path)
+        convert_to_json_file(snapshot_path, output_path, dataset_type=dataset_type)
     elif output_format == "sql_files":
         convert_to_sql_files(snapshot_path, output_path)
     else:
@@ -138,18 +144,30 @@ def main():
         default=None,
         help="Force output format (json or sql_files). If not specified, auto-detects from dataset type or snapshot contents",
     )
+    parser.add_argument(
+        "--dataset_type",
+        type=str,
+        choices=["spider", "bird", "spider2"],
+        default=None,
+        help="Dataset type. For 'bird', output follows BIRD's official submission format "
+        "({question_id: 'sql\\t----- bird -----\\tdb_id'}). Default: read from config if --snapshot_path is omitted",
+    )
     args = parser.parse_args()
 
     snapshot_path = args.snapshot_path
+    dataset_type = args.dataset_type
     if snapshot_path is None:
         from app.config import get_config
 
         app_config = get_config()
         configure_logger(app_config.logger_config.print_level)
         snapshot_path = app_config.sql_selection_config.save_path
+        if dataset_type is None:
+            dataset_type = app_config.dataset_config.type
     logger.info(f"Converting dataset snapshot {snapshot_path}")
     auto_convert(
         snapshot_path=snapshot_path,
+        dataset_type=dataset_type,
         output_path=args.output,
         force_format=args.format,
     )

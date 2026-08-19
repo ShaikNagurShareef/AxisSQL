@@ -1,1 +1,0 @@
-SELECT COUNT(DISTINCT "indicator_code") FROM "WORLD_BANK"."WORLD_BANK_INTL_DEBT"."INTERNATIONAL_DEBT" WHERE "country_name" = 'Russia' AND "value" = 0 AND "value" IS NOT NULL

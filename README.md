@@ -1,10 +1,9 @@
 <div align="center">
 
 <h1>AxisSQL</h1>
-<p><strong>ICLR 2027 · Mapping the Axes of Inference-Time Scaling for Text-to-SQL</strong></p>
+<p><strong>Mapping the Axes of Inference-Time Scaling for Text-to-SQL</strong></p>
 
 <p>
-  <img src="https://img.shields.io/badge/Conference-ICLR%202027-0ea5e9" alt="ICLR 2027">
   <img src="https://img.shields.io/badge/Task-Text--to--SQL-0f766e" alt="Task">
   <img src="https://img.shields.io/badge/Benchmarks-BIRD-7c3aed" alt="Benchmarks">
 </p>
@@ -161,7 +160,6 @@ AxisSQL (built on DeepEye-SQL)
 ├── runner/              # reproducible entry scripts
 ├── results/             # released predictions and few-shot seeds
 ├── script/              # helper shell scripts + scaling_curve.py (AxisSQL evaluation)
-├── paper/               # ICLR 2027 submission (main.tex, references, style)
 └── workspace/           # generated snapshots and intermediate outputs
 ```
 
@@ -171,6 +169,7 @@ AxisSQL (built on DeepEye-SQL)
 - [script/scaling_curve.py](script/scaling_curve.py): reproducible scaling study harness (primary experiment script)
 - [app/pipeline/sql_selection/agg_agent.py](app/pipeline/sql_selection/agg_agent.py): execution-grounded aggregator (agentic selection)
 - [config/config-bird-vllm-gemma\*.toml](config/): model-specific BIRD configurations for four coder models
+- [config/config-bird-ngrok-gemma4.toml](config/config-bird-ngrok-gemma4.toml): Gemma-4-31B over an ngrok-tunneled endpoint
 
 **DeepEye-SQL pipeline (foundation):**
 - [script/run_pipeline.sh](script/run_pipeline.sh): full pipeline automation
@@ -204,15 +203,6 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
-### 3. Optional cloud dependencies
-
-Spider2 cloud evaluation may require valid:
-
-- BigQuery credentials
-- Snowflake credentials
-
-The corresponding paths are configured in [config/config-spider2-example.toml](config/config-spider2-example.toml).
-
 ## Dataset Setup
 
 AxisSQL evaluates on **BIRD mini-dev** (a manageable subset for systematic scaling studies).
@@ -238,12 +228,12 @@ This downloads the **BIRD dev split**. AxisSQL primarily uses BIRD mini-dev for 
 AxisSQL includes model-specific BIRD configurations for four open coder models:
 
 - [config/config-bird-vllm-gemma3.toml](config/config-bird-vllm-gemma3.toml) — Gemma-3-27B
-- [config/config-bird-vllm-gemma4.toml](config/config-bird-vllm-gemma4.toml) — Gemma-4-31B
+- [config/config-bird-vllm-gemma4.toml](config/config-bird-vllm-gemma4.toml) — Gemma-4-31B (internal vLLM host)
+- [config/config-bird-ngrok-gemma4.toml](config/config-bird-ngrok-gemma4.toml) — Gemma-4-31B served through an ngrok tunnel (`https://ustllm.ngrok.app/v1`)
 - [config/config-bird-vllm-qwen2.5coder.toml](config/config-bird-vllm-qwen2.5coder.toml) — Qwen2.5-Coder-32B
 - [config/config-bird-vllm-qwen3coder.toml](config/config-bird-vllm-qwen3coder.toml) — Qwen3-Coder-30B-A3B
 
-Legacy example configs (if running on Spider/Spider2):
-- [config/config-spider-example.toml](config/config-spider-example.toml)
+Legacy example config:
 - [config/config-bird-example.toml](config/config-bird-example.toml)
 
 ### Important config blocks
@@ -404,18 +394,48 @@ uv run script/scaling_curve.py \
 - **Synthesis gain**: delta between tournament and execution-grounded synthesis
 - **Moderate-difficulty focus**: AxisSQL highlights gains concentrated on mid-difficulty queries
 
+## BIRD Bench Test Set Submission
+
+The BIRD Bench **test set** is hidden (no gold SQL, not publicly downloadable) and is scored centrally by the BIRD team.
+To get official Execution Accuracy (EX) / R-VES scores:
+
+1. **Request the test set**: email `bird.bench23@gmail.com` and follow BIRD's Submission Guideline to receive `test.json` and `test_databases/`.
+2. **Place the data**: `data/bird/test/test.json` and `data/bird/test/test_databases/{db_id}/{db_id}.sqlite`.
+3. **Create a test-split config**: copy an existing config and switch every `dev` path to `test` — `split`, `root_path`, and every `dev`-named snapshot/storage path (`[dataset].save_path`, `[vector_database].store_root_path`, and each `[*.llm]` stage's sibling `save_path`). All of these follow a `bird/dev...` path convention, so one `sed` pass handles it:
+
+```bash
+cp config/config-bird-vllm-qwen3coder.toml config/config-bird-vllm-qwen3coder-test.toml
+sed -i.bak \
+  -e 's#split = "dev"#split = "test"#' \
+  -e 's#root_path = "data/bird/data_minidev/MINIDEV"#root_path = "data/bird"#' \
+  -e 's#bird/dev#bird/test#g' \
+  config/config-bird-vllm-qwen3coder-test.toml
+rm config/config-bird-vllm-qwen3coder-test.toml.bak
+export CONFIG_PATH=config/config-bird-vllm-qwen3coder-test.toml
+```
+
+`icl_few_shot_examples_path` intentionally keeps pointing at `results/bird_dev_few_shots.json` — those ICL examples come from the labeled dev set regardless of which split you're generating for.
+
+4. **Run the pipeline** exactly as in [Quick Start](#quick-start) (`preprocess_dataset.py` → ... → `run_sql_selection.py`). The test split has no gold SQL, so `runner/evaluation.py` cannot score it locally — that's expected.
+5. **Generate the submission file** in BIRD's official format. With `CONFIG_PATH` still exported from step 3, `--snapshot_path` can be omitted — it's read from `[sql_selection].save_path` in your config:
+
+```bash
+uv run runner/convert_snapshot_to_sql.py \
+  --dataset_type bird \
+  --output results/bird-test/predict_test.json
+```
+
+This produces `{question_id: "sql_query\t----- bird -----\tdb_id"}`, the exact format BIRD's evaluation harness expects.
+
+6. **Submit**: send `predict_test.json` to the BIRD team per their Submission Guideline; they typically return scores within ~10 days.
+
 ## Artifacts
 
 ### Code and configurations
 
 - **Aggregator**: [app/pipeline/sql_selection/agg_agent.py](app/pipeline/sql_selection/agg_agent.py) — execution-grounded synthesis
 - **Scaling harness**: [script/scaling_curve.py](script/scaling_curve.py) — reproducible experiment orchestration
-- **Model configs**: [config/config-bird-vllm-\*.toml](config/) — Gemma3/4, Qwen2.5, Qwen3 configurations
-
-### Paper and results
-
-- **ICLR 2027 submission**: [paper/main.tex](paper/main.tex)
-- **Per-run outputs**: Available in `workspace/` after experiment completion (structured snapshots)
+- **Model configs**: [config/config-bird-vllm-\*.toml](config/), [config/config-bird-ngrok-gemma4.toml](config/config-bird-ngrok-gemma4.toml) — Gemma3/4 (vLLM and ngrok), Qwen2.5, Qwen3 configurations
 
 ## FAQ
 
@@ -446,12 +466,11 @@ Yes. Any OpenAI-compatible endpoint works. Update the `[*.llm]` blocks in config
 If you find AxisSQL useful in your research, please cite:
 
 ```bibtex
-@article{shareef2027axissql,
-  author  = {Shaik Nagur Shareef},
-  title   = {{AxisSQL:} Mapping the Axes of Inference-Time Scaling for Text-to-SQL},
-  journal = {Proc. Int. Conf. Learn. Represent.},
-  year    = {2027},
-  note    = {ICLR 2027 Submission}
+@misc{shareef2026axissql,
+  author       = {Shaik Nagur Shareef},
+  title        = {{AxisSQL:} Mapping the Axes of Inference-Time Scaling for Text-to-SQL},
+  year         = {2026},
+  howpublished = {\url{https://github.com/ShaikNagurShareef/AxisSQL}}
 }
 ```
 
