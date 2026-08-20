@@ -416,10 +416,10 @@ all are used as their official public checkpoints, so there is nothing new to up
 | Qwen3-Coder-30B-A3B | [Qwen/Qwen3-Coder-30B-A3B-Instruct](https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct) |
 | Qwen3.6-35B-A3B | [Qwen/Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B) — **35B total / 3B active (MoE)** |
 
-**Track note for Qwen3.6-35B-A3B**: its 35B *total* parameter count is 1B over BIRD's stated Type 1 threshold
-(0–34B), even though only ~3B are active per token (MoE) and it runs comfortably on a single A100 80G in practice.
-This is a genuine boundary case — mention the MoE active-parameter count explicitly when requesting the test set so
-BIRD can decide whether it's Type 1 or Type 2 (Multi-GPU, 10-day track) on their end; don't assume Type 1 silently.
+**Track for Qwen3.6-35B-A3B**: submitted as **Type 1: Single A100 80G GPU Inference**, consistent with the
+Gemma-4-31B submission. Its 35B *total* parameter count is technically 1B over BIRD's stated 0–34B threshold, but
+only ~3B are active per token (MoE) and it runs comfortably on a single A100 80G in practice — mention the MoE
+active-parameter count when requesting the test set so BIRD has the context, but request the same track as before.
 
 ### API keys — what's actually needed
 
