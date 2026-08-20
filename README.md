@@ -233,6 +233,7 @@ AxisSQL includes model-specific BIRD configurations for four open coder models:
 - [config/config-bird-vllm-qwen2.5coder.toml](config/config-bird-vllm-qwen2.5coder.toml) — Qwen2.5-Coder-32B
 - [config/config-bird-vllm-qwen3coder.toml](config/config-bird-vllm-qwen3coder.toml) — Qwen3-Coder-30B-A3B
 - [config/config-bird-test-gemma.toml](config/config-bird-test-gemma.toml) — Gemma-4-31B, BIRD **test-split** submission config, expects a local vLLM instance (see [Serving Gemma-4-31B for the test submission](#serving-gemma-4-31b-for-the-test-submission))
+- [config/config-bird-test-qwen3.6.toml](config/config-bird-test-qwen3.6.toml) — Qwen3.6-35B-A3B, BIRD **test-split** submission config with `agg_agent` selection enabled, expects a local vLLM instance (see [Serving Qwen3.6-35B-A3B for the test submission](#serving-qwen36-35b-a3b-for-the-test-submission))
 
 Legacy example config:
 - [config/config-bird-example.toml](config/config-bird-example.toml)
@@ -402,10 +403,10 @@ This section covers everything AxisSQL needs for that submission, per BIRD's off
 
 ### Which evaluation track applies
 
-All four AxisSQL models (Gemma-3-27B, Gemma-4-31B, Qwen2.5-Coder-32B, Qwen3-Coder-30B-A3B) are ≤34B parameters, so this
-is a **Type 1: Single A100 80G GPU Inference** submission — the simplest track (Readme + code + `requirements.txt`,
-model push to Hugging Face optional). None of these models are fine-tuned; all are used as their official public
-checkpoints, so there is nothing new to upload:
+All four original AxisSQL models (Gemma-3-27B, Gemma-4-31B, Qwen2.5-Coder-32B, Qwen3-Coder-30B-A3B) are ≤34B
+parameters, so those are a clean **Type 1: Single A100 80G GPU Inference** submission — the simplest track
+(Readme + code + `requirements.txt`, model push to Hugging Face optional). None of these models are fine-tuned;
+all are used as their official public checkpoints, so there is nothing new to upload:
 
 | Model | Hugging Face |
 | --- | --- |
@@ -413,6 +414,12 @@ checkpoints, so there is nothing new to upload:
 | Gemma-4-31B | [google/gemma-4-31B-it](https://huggingface.co/google/gemma-4-31B-it) |
 | Qwen2.5-Coder-32B | [Qwen/Qwen2.5-Coder-32B-Instruct](https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct) |
 | Qwen3-Coder-30B-A3B | [Qwen/Qwen3-Coder-30B-A3B-Instruct](https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct) |
+| Qwen3.6-35B-A3B | [Qwen/Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B) — **35B total / 3B active (MoE)** |
+
+**Track note for Qwen3.6-35B-A3B**: its 35B *total* parameter count is 1B over BIRD's stated Type 1 threshold
+(0–34B), even though only ~3B are active per token (MoE) and it runs comfortably on a single A100 80G in practice.
+This is a genuine boundary case — mention the MoE active-parameter count explicitly when requesting the test set so
+BIRD can decide whether it's Type 1 or Type 2 (Multi-GPU, 10-day track) on their end; don't assume Type 1 silently.
 
 ### API keys — what's actually needed
 
@@ -482,6 +489,25 @@ vllm serve google/gemma-4-31B-it \
 much larger native context, so this can be raised if your GPU allocation has headroom, but keep the config's
 `max_model_len` in sync with whatever you launch vLLM with). Once vLLM is up and answering on `127.0.0.1:30011`,
 proceed with the pipeline below.
+
+### Serving Qwen3.6-35B-A3B for the test submission
+
+[config/config-bird-test-qwen3.6.toml](config/config-bird-test-qwen3.6.toml) follows the same local-vLLM pattern, on
+a different port (`30012`) so it can coexist with the Gemma-4 setup if needed:
+
+```bash
+vllm serve Qwen/Qwen3.6-35B-A3B \
+  --served-model-name Qwen/Qwen3.6-35B-A3B \
+  --port 30012 \
+  --max-model-len 32768 \
+  --api-key your-vllm-api-key-here
+```
+
+**Unlike the Gemma-4 command above, `--max-model-len 32768` here is an unverified starting point, not a
+live-tested value** — we don't have a running Qwen3.6 server to confirm it against. The model natively supports up
+to 262144 tokens, but vLLM's own docs recommend tensor parallelism (multi-GPU) to serve the full context; a single
+A100 80G will likely need a reduced window regardless. Start at 32768, watch for OOM errors during the first pipeline
+run, and adjust `max_model_len` in both the `vllm serve` command and the config (all five `[*.llm]` blocks) to match.
 
 ### Step-by-step: generating test-set predictions
 
